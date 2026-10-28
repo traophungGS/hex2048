@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hexagonal 2048</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Outfit:wght@400;600;800&display=swap');
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+      overflow-x: hidden;
+    }
+
+    /* Hexagon Geometry Utility */
+    .hex-cell {
+      clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    }
+
+    /* Tile Styling & Color Map */
+    .tile {
+      position: absolute;
+      transition: transform 0.18s ease-in-out, opacity 0.15s ease-in-out;
+      font-family: 'Fredoka', sans-serif;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.2), 0 4px 10px rgba(0, 0, 0, 0.3);
+      z-index: 10;
+    }
+
+    .tile-pop {
+      animation: pop 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .tile-appear {
+      animation: appear 0.22s ease-out;
+    }
+
+    @keyframes pop {
+      0% { transform: scale(1) translate(var(--tx), var(--ty)); }
+      50% { transform: scale(1.18) translate(var(--tx), var(--ty)); }
+      100% { transform: scale(1) translate(var(--tx), var(--ty)); }
+    }
+
+    @keyframes appear {
+      0% { transform: scale(0) translate(var(--tx), var(--ty)); opacity: 0; }
+      100% { transform: scale(1) translate(var(--tx), var(--ty)); opacity: 1; }
+    }
+
+    /* Tile Colors based on value */
+    .v-2 { background: linear-gradient(135deg, #e2e8f0, #cbd5e1); color: #334155; }
+    .v-4 { background: linear-gradient(135deg, #fed7aa, #fdba74); color: #7c2d12; }
+    .v-8 { background: linear-gradient(135deg, #f97316, #ea580c); color: #ffffff; }
+    .v-16 { background: linear-gradient(135deg, #fb923c, #f43f5e); color: #ffffff; }
+    .v-32 { background: linear-gradient(135deg, #f43f5e, #e11d48); color: #ffffff; }
+    .v-64 { background: linear-gradient(135deg, #e11d48, #be123c); color: #ffffff; }
+    .v-128 { background: linear-gradient(135deg, #facc15, #eab308); color: #422006; box-shadow: 0 0 15px rgba(250, 204, 21, 0.5); }
+    .v-256 { background: linear-gradient(135deg, #eab308, #ca8a04); color: #ffffff; box-shadow: 0 0 20px rgba(234, 179, 8, 0.6); }
+    .v-512 { background: linear-gradient(135deg, #a855f7, #9333ea); color: #ffffff; box-shadow: 0 0 22px rgba(168, 85, 247, 0.6); }
+    .v-1024 { background: linear-gradient(135deg, #06b6d4, #0891b2); color: #ffffff; box-shadow: 0 0 25px rgba(6, 182, 212, 0.7); }
+    .v-2048 { background: linear-gradient(135deg, #10b981, #059669); color: #ffffff; box-shadow: 0 0 30px rgba(16, 185, 129, 0.8); }
+    .v-super { background: linear-gradient(135deg, #ec4899, #8b5cf6); color: #ffffff; box-shadow: 0 0 35px rgba(236, 72, 153, 0.9); }
+
+    /* Custom button active state for touch feedback */
+    .btn-act:active {
+      transform: scale(0.92);
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-between p-3 sm:p-6 bg-slate-900 text-slate-100 select-none">
+
+  <!-- Main Container -->
+  <div class="w-full max-w-md flex flex-col items-center justify-between flex-1 gap-4">
+
+    <!-- Header Section -->
+    <header class="w-full flex items-center justify-between gap-2">
+      <div>
+        <h1 class="text-3xl sm:text-4xl font-black tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-rose-500 to-purple-500">
+          2048 <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-amber-400 border border-amber-500/30">HEX</span>
+        </h1>
+        <p class="text-xs text-slate-400 mt-0.5">Slide tiles in 6 hex directions!</p>
+      </div>
+
+      <!-- Score Boards -->
+      <div class="flex gap-2">
+        <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl px-3 py-1.5 text-center min-w-[70px]">
+          <div class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Score</div>
+          <div id="score" class="text-base sm:text-lg font-bold text-amber-400">0</div>
+        </div>
+        <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl px-3 py-1.5 text-center min-w-[70px]">
+          <div class="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Best</div>
+          <div id="best-score" class="text-base sm:text-lg font-bold text-emerald-400">0</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Toolbar Controls -->
+    <div class="w-full flex justify-between items-center bg-slate-800/40 p-2 rounded-2xl border border-slate-800">
+      <div class="flex items-center gap-2">
+        <button id="btn-sound" class="btn-act p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors" title="Toggle Audio">
+          <svg id="icon-sound-on" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M11 5L6 9H2v6h4l5 4V5z"/></svg>
+          <svg id="icon-sound-off" class="w-5 h-5 hidden text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" /></svg>
+        </button>
+        <button id="btn-undo" class="btn-act px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs flex items-center gap-1.5 transition-colors" title="Undo Move">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+          Undo
+        </button>
+      </div>
+
+      <button id="btn-restart" class="btn-act px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-600 hover:to-rose-600 text-white font-bold text-xs shadow-lg shadow-rose-500/20 transition-all flex items-center gap-1.5">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        New Game
+      </button>
+    </div>
+
+    <!-- Hexagonal Game Board Container -->
+    <div class="relative w-full aspect-square max-w-[360px] sm:max-w-[400px] flex items-center justify-center p-2 my-auto">
+      <!-- Background Board Frame -->
+      <div class="absolute inset-0 bg-slate-800/50 backdrop-blur-md rounded-3xl border border-slate-700/50 shadow-2xl"></div>
+
+      <!-- Hex Canvas / Tile Layer -->
+      <div id="game-board" class="relative w-full h-full flex items-center justify-center">
+        <!-- Background Grid Cells will be rendered dynamically here -->
+        <div id="grid-container" class="absolute inset-0"></div>
+        <!-- Moving Tiles Layer -->
+        <div id="tiles-container" class="absolute inset-0"></div>
+      </div>
+
+      <!-- Game Over Overlay -->
+      <div id="game-over" class="absolute inset-0 bg-slate-950/85 backdrop-blur-md rounded-3xl flex flex-col items-center justify-center gap-4 opacity-0 pointer-events-none transition-opacity duration-300 z-30">
+        <div class="text-center">
+          <h2 class="text-3xl font-extrabold text-rose-500 mb-1">Game Over!</h2>
+          <p class="text-sm text-slate-300">No more valid hex moves available.</p>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 px-6 py-3 rounded-2xl text-center">
+          <div class="text-xs text-slate-400 font-bold uppercase">Final Score</div>
+          <div id="final-score" class="text-2xl font-black text-amber-400">0</div>
+        </div>
+        <button id="btn-try-again" class="btn-act px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold text-sm shadow-lg shadow-teal-500/20 transition-all">
+          Try Again
+        </button>
+      </div>
+    </div>
+
+    <!-- Hex Directional Pad Controls -->
+    <div class="w-full flex flex-col items-center gap-1.5 pb-2">
+      <div class="text-[11px] text-slate-400 font-medium tracking-wide flex items-center gap-2">
+        <span>Keyboard: <kbd class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-amber-400">Q W E A S D</kbd></span>
+        <span>•</span>
+        <span>Swipe in 6 directions</span>
+      </div>
+
+      <!-- Hex D-Pad Wheel -->
+      <div class="relative w-48 h-36 mt-1 flex items-center justify-center">
+        <!-- Top Row (Q: Up-Left, W: Up, E: Up-Right) -->
+        <button data-dir="UL" class="hex-btn btn-act absolute top-0 left-2 w-12 h-12 bg-slate-800 border border-slate-700 hover:bg-slate-700 active:bg-amber-500 text-slate-300 hover:text-white rounded-xl flex items-center justify-center shadow-md transition-all" title="Up-Left (Q)">
+          <span class="text-xs font-black uppercase">Q</span>
+          <svg class="w-4 h-4 absolute top-1 left-1 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M7 17L17 7M7 7h10v10"/></svg>
+        </button>
+        <button data-dir="U" class="hex-btn btn-act absolute top-0 left-18 w-12 h-12 bg-slate-800 border border-slate-700 hover:bg-slate-700 active:bg-amber-500 text-slate-300 hover:text-white rounded-xl flex items-center justify-center shadow-md transition-all" title="Up (W)">
+          <span class="text-xs font-black uppercase">W</span>
+          <svg class="w-4 h-4 absolute top-1 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/></svg>
+        </button>
+        <button data-dir="UR" class="hex-btn btn-act absolute top-0 right-2 w-12 h-12 bg-slate-800 border border-slate-700 hover:bg-slate-700 active:bg-amber-500 text-slate-300 hover:text-white rounded-xl flex items-center justify-center shadow-md transition-all" title="Up-Right (E)">
+          <span class="text-xs font-black uppercase">E</span>
+          <svg class="w-4 h-4 absolute top-1 right-1 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17 17L7 7M17 7H7v10"/></svg>
+        </button>
+
+        <!-- Bottom Row (A: Down-Left, S: Down, D: Down-Right) -->
+        <button data-dir="DL" class="hex-btn btn-act absolute bottom-0 left-2 w-12 h-12 bg-slate-800 border border-slate-700 hover:bg-slate-700 active:bg-amber-500 text-slate-300 hover:text-white rounded-xl flex items-center justify-center shadow-md transition-all" title="Down-Left (A)">
+          <span class="text-xs font-black uppercase">A</span>
+          <svg class="w-4 h-4 absolute bottom-1 left-1 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M7 7l10 10M7 17h10V7"/></svg>
+        </button>
+        <button data-dir="D" class="hex-btn btn-act absolute bottom-0 left-18 w-12 h-12 bg-slate-800 border border-slate-700 hover:bg-slate-700 active:bg-amber-500 text-slate-300 hover:text-white rounded-xl flex items-center justify-center shadow-md transition-all" title="Down (S)">
+          <span class="text-xs font-black uppercase">S</span>
+          <svg class="w-4 h-4 absolute bottom-1 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <button data-dir="DR" class="hex-btn btn-act absolute bottom-0 right-2 w-12 h-12 bg-slate-800 border border-slate-700 hover:bg-slate-700 active:bg-amber-500 text-slate-300 hover:text-white rounded-xl flex items-center justify-center shadow-md transition-all" title="Down-Right (D)">
+          <span class="text-xs font-black uppercase">D</span>
+          <svg class="w-4 h-4 absolute bottom-1 right-1 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17 7L7 17M17 17H7V7"/></svg>
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    /**
+     * Web Audio API Synthesizer for SFX
+     */
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) {
+            this.ctx = new AudioContext();
+          }
+        }
+      }
+
+      playTone(freq, type = 'sine', duration = 0.1, gainVal = 0.15) {
+        if (!this.enabled || !this.ctx) return;
+        try {
+          if (this.ctx.state === 'suspended') {
+            this.ctx.resume();
+          }
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+          gain.gain.setValueAtTime(gainVal, this.ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + duration);
+
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+
+          osc.start();
+          osc.stop(this.ctx.currentTime + duration);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      playMove() {
+        this.playTone(320, 'sine', 0.08, 0.1);
+      }
+
+      playMerge(val = 2) {
+        // Dynamic pitch depending on tile value merged
+        const baseFreq = 400 + Math.log2(val) * 60;
+        this.playTone(baseFreq, 'triangle', 0.15, 0.2);
+      }
+
+      playSpawn() {
+        this.playTone(220, 'sine', 0.06, 0.08);
+      }
+
+      playGameOver() {
+        if (!this.enabled || !this.ctx) return;
+        const notes = [300, 260, 220, 180];
+        notes.forEach((f, i) => {
+          setTimeout(() => this.playTone(f, 'sawtooth', 0.2, 0.15), i * 150);
+        });
+      }
+
+      playClick() {
+        this.playTone(600, 'sine', 0.04, 0.05);
+      }
+    }
+
+    const sound = new SoundEngine();
+
+    /**
+     * Hexagonal Grid Logic using Cube Coordinates (q, r, s) where q + r + s = 0
+     * Radius = 4 gives 37 cells.
+     */
+    const HEX_RADIUS = 4;
+
+    // 6 Primary Hexagonal Axial Directions
+    // Directions mapping for sliding lines
+    const DIRECTIONS = {
+      'W':  { q: 0,  r: -1, s: 1 },  // UP
+      'S':  { q: 0,  r: 1,  s: -1 }, // DOWN
+      'Q':  { q: -1, r: 0,  s: 1 },  // UP-LEFT
+      'E':  { q: 1,  r: -1, s: 0 },  // UP-RIGHT
+      'A':  { q: -1, r: 1,  s: 0 },  // DOWN-LEFT
+      'D':  { q: 1,  r: 0,  s: -1 }  // DOWN-RIGHT
+    };
+
+    // Helper key for direction aliases
+    const DIR_MAP = {
+      'U': 'W',
+      'D': 'S',
+      'UL': 'Q',
+      'UR': 'E',
+      'DL': 'A',
+      'DR': 'D'
+    };
+
+    class Hex2048 {
+      constructor() {
+        this.gridContainer = document.getElementById('grid-container');
+        this.tilesContainer = document.getElementById('tiles-container');
+        this.scoreEl = document.getElementById('score');
+        this.bestScoreEl = document.getElementById('best-score');
+        this.gameOverEl = document.getElementById('game-over');
+        this.finalScoreEl = document.getElementById('final-score');
+
+        this.score = 0;
+        this.bestScore = parseInt(localStorage.getItem('hex2048_best') || '0', 10);
+        this.cells = []; // [{q, r, s, key, x, y}]
+        this.tiles = []; // [{id, q, r, s, value, element}]
+        this.history = []; // State stack for Undo
+        this.tileIdCounter = 1;
+        this.isAnimating = false;
+
+        this.initGridGeometry();
+        this.setupEventListeners();
+        this.resetGame();
+
+        window.addEventListener('resize', () => this.renderPositions());
+      }
+
+      // Generate Cube Coordinates for Hexagon Radius 3
+      initGridGeometry() {
+        this.cells = [];
+        this.gridContainer.innerHTML = '';
+
+        for (let q = -HEX_RADIUS + 1; q < HEX_RADIUS; q++) {
+          const r1 = Math.max(-HEX_RADIUS + 1, -q - HEX_RADIUS + 1);
+          const r2 = Math.min(HEX_RADIUS - 1, -q + HEX_RADIUS - 1);
+          for (let r = r1; r <= r2; r++) {
+            const s = -q - r;
+            this.cells.push({ q, r, s, key: `${q},${r},${s}` });
+          }
+        }
+
+        // Draw background static empty hex slots
+        this.cells.forEach(cell => {
+          const div = document.createElement('div');
+          div.className = 'absolute hex-cell bg-slate-800/60 border border-slate-700/40 shadow-inner flex items-center justify-center';
+          div.dataset.key = cell.key;
+          this.gridContainer.appendChild(div);
+          cell.bgElement = div;
+        });
+
+        this.renderPositions();
+      }
+
+      // Calculate pixel coordinates for hex cells given container dimensions
+      renderPositions() {
+        const rect = this.gridContainer.getBoundingClientRect();
+        const size = Math.min(rect.width, rect.height);
+        
+        // Hexagon Radius calculation scaled for radius 4 (7 columns across)
+        this.hexSize = size / (HEX_RADIUS * 3.35); 
+        this.centerX = rect.width / 2;
+        this.centerY = rect.height / 2;
+
+        this.cells.forEach(cell => {
+          // Pointy-topped hexagon conversion formula
+          const x = this.centerX + this.hexSize * (Math.sqrt(3) * cell.q + Math.sqrt(3)/2 * cell.r);
+          const y = this.centerY + this.hexSize * (3/2 * cell.r);
+
+          cell.x = x;
+          cell.y = y;
+
+          const tileSize = this.hexSize * 1.68;
+
+          if (cell.bgElement) {
+            cell.bgElement.style.width = `${tileSize}px`;
+            cell.bgElement.style.height = `${tileSize}px`;
+            cell.bgElement.style.left = `${x - tileSize/2}px`;
+            cell.bgElement.style.top = `${y - tileSize/2}px`;
+          }
+        });
+
+        // Update positions of active tiles
+        this.tiles.forEach(tile => {
+          this.updateTilePosition(tile);
+        });
+      }
+
+      updateTilePosition(tile) {
+        const cell = this.getCell(tile.q, tile.r, tile.s);
+        if (!cell) return;
+
+        const tileSize = this.hexSize * 1.68;
+        tile.element.style.width = `${tileSize}px`;
+        tile.element.style.height = `${tileSize}px`;
+
+        const tx = cell.x - tileSize / 2;
+        const ty = cell.y - tileSize / 2;
+
+        tile.element.style.transform = `translate(${tx}px, ${ty}px)`;
+        tile.element.style.setProperty('--tx', `${tx}px`);
+        tile.element.style.setProperty('--ty', `${ty}px`);
+        tile.element.style.fontSize = tileSize > 40 ? `${tileSize * 0.36}px` : `${tileSize * 0.3}px`;
+      }
+
+      getCell(q, r, s) {
+        return this.cells.find(c => c.q === q && c.r === r && c.s === s);
+      }
+
+      getTileAt(q, r, s) {
+        return this.tiles.find(t => t.q === q && t.r === r && t.s === s);
+      }
+
+      formatNumber(val) {
+        return val >= 1000 ? val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ") : val;
+      }
+
+      getTileColorClass(val) {
+        if (val <= 2048) return `v-${val}`;
+        return 'v-super';
+      }
+
+      createTileElement(val) {
+        const el = document.createElement('div');
+        el.className = `tile hex-cell ${this.getTileColorClass(val)} tile-appear`;
+        el.textContent = this.formatNumber(val);
+        return el;
+      }
+
+      spawnTile(val = null) {
+        const emptyCells = this.cells.filter(c => !this.getTileAt(c.q, c.r, c.s));
+        if (emptyCells.length === 0) return null;
+
+        const randomCell = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+        const tileValue = val || (Math.random() < 0.85 ? 2 : 4);
+
+        const tile = {
+          id: this.tileIdCounter++,
+          q: randomCell.q,
+          r: randomCell.r,
+          s: randomCell.s,
+          value: tileValue,
+          element: this.createTileElement(tileValue)
+        };
+
+        this.tilesContainer.appendChild(tile.element);
+        this.tiles.push(tile);
+        this.updateTilePosition(tile);
+        sound.playSpawn();
+
+        return tile;
+      }
+
+      saveState() {
+        const snapshot = {
+          score: this.score,
+          tiles: this.tiles.map(t => ({ q: t.q, r: t.r, s: t.s, value: t.value }))
+        };
+        this.history.push(snapshot);
+        if (this.history.length > 15) this.history.shift(); // Keep last 15 moves
+      }
+
+      undo() {
+        if (this.history.length === 0 || this.isAnimating) return;
+        sound.playClick();
+
+        const state = this.history.pop();
+        this.score = state.score;
+        this.scoreEl.textContent = this.formatNumber(this.score);
+
+        // Clear existing tiles
+        this.tiles.forEach(t => t.element.remove());
+        this.tiles = [];
+
+        // Restore snapshot tiles
+        state.tiles.forEach(t => {
+          const tile = {
+            id: this.tileIdCounter++,
+            q: t.q,
+            r: t.r,
+            s: t.s,
+            value: t.value,
+            element: this.createTileElement(t.value)
+          };
+          this.tilesContainer.appendChild(tile.element);
+          this.tiles.push(tile);
+          this.updateTilePosition(tile);
+        });
+
+        // Hide game over if displayed
+        this.gameOverEl.classList.add('opacity-0', 'pointer-events-none');
+      }
+
+      resetGame() {
+        this.history = [];
+        this.score = 0;
+        this.scoreEl.textContent = '0';
+        this.bestScoreEl.textContent = this.formatNumber(this.bestScore);
+
+        this.tiles.forEach(t => t.element.remove());
+        this.tiles = [];
+
+        this.gameOverEl.classList.add('opacity-0', 'pointer-events-none');
+
+        // Spawn initial two tiles
+        this.spawnTile();
+        this.spawnTile();
+      }
+
+      // Main Hex Sliding & Merging Algorithm
+      move(dirKey) {
+        if (this.isAnimating) return;
+        const dirCode = DIR_MAP[dirKey] || dirKey;
+        const vec = DIRECTIONS[dirCode];
+        if (!vec) return;
+
+        sound.init(); // Initialize Web Audio context on user gesture
+
+        // Save current board state for undo functionality
+        const stateBefore = JSON.stringify(this.tiles.map(t => ({ q: t.q, r: t.r, s: t.s, v: t.value })));
+
+        // Organize lines of traversal along direction vector
+        const lines = this.getLinesForDirection(vec);
+        let moved = false;
+        let scoreGained = 0;
+
+        this.isAnimating = true;
+
+        lines.forEach(line => {
+          // Collect existing tiles in line ordered from destination to origin
+          const lineTiles = line
+            .map(cell => this.getTileAt(cell.q, cell.r, cell.s))
+            .filter(Boolean);
+
+          const newValues = [];
+          let mergedInLine = [];
+
+          // Process merges along the line
+          for (let i = 0; i < lineTiles.length; i++) {
+            if (i < lineTiles.length - 1 && lineTiles[i].value === lineTiles[i + 1].value) {
+              const mergedVal = lineTiles[i].value * 2;
+              newValues.push({ value: mergedVal, mergedFrom: [lineTiles[i], lineTiles[i + 1]] });
+              scoreGained += mergedVal;
+              i++; // Skip next tile since it merged
+            } else {
+              newValues.push({ value: lineTiles[i].value, mergedFrom: [lineTiles[i]] });
+            }
+          }
+
+          // Move tile elements to new target positions
+          newValues.forEach((item, index) => {
+            const targetCell = line[index];
+            item.mergedFrom.forEach(t => {
+              if (t.q !== targetCell.q || t.r !== targetCell.r || t.s !== targetCell.s) {
+                moved = true;
+              }
+              t.q = targetCell.q;
+              t.r = targetCell.r;
+              t.s = targetCell.s;
+              this.updateTilePosition(t);
+            });
+          });
+        });
+
+        if (moved) {
+          this.saveState();
+          sound.playMove();
+
+          setTimeout(() => {
+            // Consolidate merged tiles into single new tiles
+            this.consolidateTiles();
+
+            if (scoreGained > 0) {
+              this.score += scoreGained;
+              this.scoreEl.textContent = this.formatNumber(this.score);
+              if (this.score > this.bestScore) {
+                this.bestScore = this.score;
+                this.bestScoreEl.textContent = this.formatNumber(this.bestScore);
+                localStorage.setItem('hex2048_best', this.bestScore.toString());
+              }
+              sound.playMerge(scoreGained);
+            }
+
+            // Spawn a new tile after move completes
+            this.spawnTile();
+
+            this.isAnimating = false;
+
+            // Check if game over
+            if (this.checkGameOver()) {
+              setTimeout(() => {
+                this.finalScoreEl.textContent = this.formatNumber(this.score);
+                this.gameOverEl.classList.remove('opacity-0', 'pointer-events-none');
+                sound.playGameOver();
+              }, 250);
+            }
+          }, 180);
+        } else {
+          this.isAnimating = false;
+        }
+      }
+
+      // Group hex cells into parallel lines according to movement vector
+      getLinesForDirection(vec) {
+        const linesMap = new Map();
+
+        this.cells.forEach(cell => {
+          // Calculate projection key perpendicular to movement vector
+          let lineKey;
+          if (vec.q === 0) lineKey = cell.q;
+          else if (vec.r === 0) lineKey = cell.r;
+          else lineKey = cell.s;
+
+          if (!linesMap.has(lineKey)) {
+            linesMap.set(lineKey, []);
+          }
+          linesMap.get(lineKey).push(cell);
+        });
+
+        // Sort each line from edge nearest movement direction to opposite edge
+        const lines = Array.from(linesMap.values());
+        lines.forEach(line => {
+          line.sort((a, b) => {
+            if (vec.q !== 0) return vec.q > 0 ? b.q - a.q : a.q - b.q;
+            if (vec.r !== 0) return vec.r > 0 ? b.r - a.r : a.r - b.r;
+            return vec.s > 0 ? b.s - a.s : a.s - b.s;
+          });
+        });
+
+        return lines;
+      }
+
+      // Consolidate overlapping tiles created by merge
+      consolidateTiles() {
+        const occupied = new Map();
+        const toRemove = [];
+
+        this.tiles.forEach(tile => {
+          const key = `${tile.q},${tile.r},${tile.s}`;
+          if (occupied.has(key)) {
+            const existing = occupied.get(key);
+            existing.value *= 2;
+            existing.element.textContent = this.formatNumber(existing.value);
+            existing.element.className = `tile hex-cell ${this.getTileColorClass(existing.value)} tile-pop`;
+            toRemove.push(tile);
+          } else {
+            occupied.set(key, tile);
+          }
+        });
+
+        toRemove.forEach(tile => {
+          tile.element.remove();
+          const idx = this.tiles.indexOf(tile);
+          if (idx !== -1) this.tiles.splice(idx, 1);
+        });
+      }
+
+      // Check if any valid moves remain
+      checkGameOver() {
+        if (this.tiles.length < this.cells.length) return false;
+
+        // Check adjacent tiles in all 6 axial directions for matching values
+        for (const tile of this.tiles) {
+          for (const dirKey in DIRECTIONS) {
+            const vec = DIRECTIONS[dirKey];
+            const neighbor = this.getTileAt(tile.q + vec.q, tile.r + vec.r, tile.s + vec.s);
+            if (neighbor && neighbor.value === tile.value) {
+              return false; // Valid move exists
+            }
+          }
+        }
+        return true;
+      }
+
+      setupEventListeners() {
+        // Keyboard controls
+        window.addEventListener('keydown', (e) => {
+          const key = e.key.toUpperCase();
+          if (['W', 'S', 'Q', 'E', 'A', 'D'].includes(key)) {
+            e.preventDefault();
+            this.move(key);
+          }
+        });
+
+        // On-screen Hex Directional Buttons
+        document.querySelectorAll('.hex-btn').forEach(btn => {
+          const handler = (e) => {
+            e.preventDefault();
+            const dir = btn.dataset.dir;
+            this.move(dir);
+          };
+          btn.addEventListener('click', handler);
+        });
+
+        // Toolbar Buttons
+        document.getElementById('btn-restart').addEventListener('click', () => {
+          sound.playClick();
+          this.resetGame();
+        });
+
+        document.getElementById('btn-try-again').addEventListener('click', () => {
+          sound.playClick();
+          this.resetGame();
+        });
+
+        document.getElementById('btn-undo').addEventListener('click', () => {
+          this.undo();
+        });
+
+        const soundBtn = document.getElementById('btn-sound');
+        const iconOn = document.getElementById('icon-sound-on');
+        const iconOff = document.getElementById('icon-sound-off');
+
+        soundBtn.addEventListener('click', () => {
+          sound.enabled = !sound.enabled;
+          if (sound.enabled) {
+            sound.init();
+            iconOn.classList.remove('hidden');
+            iconOff.classList.add('hidden');
+          } else {
+            iconOn.classList.add('hidden');
+            iconOff.classList.remove('hidden');
+          }
+        });
+
+        // Touch Swipe & Mouse Drag Handling for 6-directional Hex Swipes
+        const board = document.getElementById('game-board');
+        let startX = 0, startY = 0;
+
+        const handleStart = (x, y) => {
+          startX = x;
+          startY = y;
+        };
+
+        const handleEnd = (endX, endY) => {
+          const dx = endX - startX;
+          const dy = endY - startY;
+          const dist = Math.hypot(dx, dy);
+
+          if (dist < 25) return; // Ignore small accidental taps
+
+          // Calculate angle in degrees [-180, 180]
+          let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+
+          // Sectorize angle into 6 hex directions (60-degree sectors)
+          // 0° is Right (Down-Right / Up-Right split)
+          let dir = 'D';
+          if (angle >= -30 && angle < 30) dir = 'D';         // Down-Right
+          else if (angle >= 30 && angle < 90) dir = 'S';     // Down
+          else if (angle >= 90 && angle < 150) dir = 'A';    // Down-Left
+          else if (angle >= 150 || angle < -150) dir = 'Q';  // Up-Left
+          else if (angle >= -150 && angle < -90) dir = 'W';  // Up
+          else if (angle >= -90 && angle < -30) dir = 'E';   // Up-Right
+
+          this.move(dir);
+        };
+
+        board.addEventListener('touchstart', (e) => {
+          if (e.touches.length === 1) {
+            handleStart(e.touches[0].clientX, e.touches[0].clientY);
+          }
+        }, { passive: true });
+
+        board.addEventListener('touchend', (e) => {
+          if (e.changedTouches.length === 1) {
+            handleEnd(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+          }
+        }, { passive: true });
+
+        board.addEventListener('mousedown', (e) => {
+          handleStart(e.clientX, e.clientY);
+          const onMouseUp = (upEvent) => {
+            handleEnd(upEvent.clientX, upEvent.clientY);
+            window.removeEventListener('mouseup', onMouseUp);
+          };
+          window.addEventListener('mouseup', onMouseUp);
+        });
+      }
+    }
+
+    // Initialize Game Engine on Page Load
+    window.onload = () => {
+      new Hex2048();
+    };
+  </script>
+</body>
+</html>
